@@ -149,6 +149,57 @@ let
       '';
     };
 
+    android = with builtins; universal //  rec {
+
+      androidSdk = args.androidSdk or pkgs.androidenv.androidPkgs_9_0.androidsdk;
+
+      nativeBuildInputs = with pkgs; (universal.nativeBuildInputs or [ ]) ++ [
+        androidSdk
+        jdk17
+        # pkgs-stable.androidenv.emulateApp #TODO: output avd running the apk into $out/bin/${pname} to make nix run .#android available or something
+      ];
+
+      buildInputs = (universal.buildInputs or [ ]) ++ [ 
+
+      ];
+
+
+      outname = args.pname or "app";
+      androidOutputs = args.buildTypes or [ "fat" "split" "bundle" ];
+      dontDartBuild = true;   
+      buildPhase = universal.buildPhase or ''
+        runHook preBuild
+
+        mkdir -p build/flutter_assets/fonts
+
+        # build fat apk in build/app/outputs/flutter-apk/app-release.apk
+        ${elem "fat" androidOutputs} && flutter build apk -v --release ${builtins.concatStringsSep " " (map (flag: "\"${flag}\"") flutterBuildFlags)}
+        
+        # build thin apks in: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk, build/app/outputs/flutter-apk/app-arm64-v8a-release.apk and build/app/outputs/flutter-apk/app-x86_64-release.apk
+        ${elem "split" androidOutputs} && flutter build apk -v --release --split-per-abi ${builtins.concatStringsSep " " (map (flag: "\"${flag}\"") flutterBuildFlags)}
+        
+        # build aab (for e.g. uploading to playstore) in
+        ${elem "bundle" androidOutputs} && flutter build appbundle -v --release ${builtins.concatStringsSep " " (map (flag: "\"${flag}\"") flutterBuildFlags)}
+
+        runHook postBuild
+      '';
+
+      dontDartInstall = true;
+      installPhase = universal.installPhase or ''
+        runHook preInstall
+
+        ${elem "fat" androidOutputs} && cp -r build/app/outputs/flutter-apk/app-release.apk $out/${outname}-fat.apk
+
+        ${elem "split" androidOutputs} && cp -r build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk $out/${outname}-armeabi-v7a.apk
+        ${elem "split" androidOutputs} && cp -r build/app/outputs/flutter-apk/app-arm64-v8a-release.apk $out/${outname}-arm64-v8a.apk
+        ${elem "split" androidOutputs} && cp -r build/app/outputs/flutter-apk/app-x86_64-release.apk $out/${outname}-x86_64.apk
+
+        ${elem "bundle" androidOutputs} && cp -r build/app/outputs/flutter-apk/app-release.aab $out/${outname}.aab
+
+        runHook postInstall
+      '';
+    };
+
     web = universal // {
       dontDartBuild = true;
       buildPhase = universal.buildPhase or ''
